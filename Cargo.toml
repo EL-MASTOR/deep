@@ -1,0 +1,20 @@
+[package]
+name = "rust_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reqwest = "0.12.9"
+scraper = "0.21.0"
+# TODO: use only the needed features
+# tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.42.0", features = ["full"] }
+bincode = "1.3.3"
+tokio-stream="0.1.16"
+futures="0.3.31"
+url="2.5.4"
+dashmap="6.1.0"
+scc = "2.3.0"
+
+[profile.release]
+panic = "abort"
