@@ -14,18 +14,27 @@ use tokio::{
 };
 use url::Url;
 
-async fn download<T: AsRef<[u8]>>(url: &Url, dir: Arc<String>, content: T) -> io_result<()> {
+async fn download<T: AsRef<[u8]>>(
+    url: &Url,
+    dir: Arc<String>,
+    content: T,
+    pages: bool,
+) -> io_result<()> {
     let the_fn = url.path();
     let path = Path::new(the_fn);
     let dir = dir.to_string();
+    let mut tail_dir = String::from("/");
+    let mut final_path = dir.to_owned() + the_fn;
+    if pages && !the_fn.ends_with(".html") {
+        tail_dir = tail_dir + path.file_name().unwrap().to_str().unwrap();
+        final_path = final_path + "/index.html";
+    }
     if let Some(parent) = path.parent() {
         if parent.to_str() != Some("") {
-            fs::create_dir_all(dir.to_owned() + parent.to_str().unwrap()).await?;
+            fs::create_dir_all(dir + parent.to_str().unwrap() + &tail_dir).await?;
         }
     }
-    if !the_fn.ends_with("/") {
-        fs::write(dir + the_fn, content).await?;
-    }
+    fs::write(final_path, content).await?;
     Ok(())
 }
 
@@ -91,8 +100,8 @@ async fn fetch(
     Ok(FetchedContent::VectContent(content))
 }
 
-async fn download_wrapper<T: AsRef<[u8]>>(url: &Url, dir: Arc<String>, content: T) {
-    if let Err(err) = download(&url, dir, content).await {
+async fn download_wrapper<T: AsRef<[u8]>>(url: &Url, dir: Arc<String>, content: T, pages: bool) {
+    if let Err(err) = download(&url, dir, content, pages).await {
         eprintln!("\x1b[1;91mError downloading\x1b[0m {} {err}", &url);
     }
 }
@@ -127,9 +136,11 @@ async fn download_resources(
                 println!("\x1b[96m{}/{}\x1b[0m {}", progress, total, url_str);
                 match content {
                     FetchedContent::StringContent(value) => {
-                        download_wrapper(&url, dir, value).await
+                        download_wrapper(&url, dir, value, false).await
                     }
-                    FetchedContent::VectContent(value) => download_wrapper(&url, dir, value).await,
+                    FetchedContent::VectContent(value) => {
+                        download_wrapper(&url, dir, value, false).await
+                    }
                 };
             } else if let Err(FetchError::StatusCode(status)) = fetched_content {
                 eprintln!(
@@ -273,7 +284,7 @@ async fn main() {
                     }
                 };
                 // TODO: why not use dwonload_wrapper here
-                if let Err(err) = download(&url, dir, content.as_bytes()).await {
+                if let Err(err) = download(&url, dir, content.as_bytes(), true).await {
                     eprintln!("\x1b[1;91mError downloading\x1b[0m {} {err}", &url);
                 }
 
