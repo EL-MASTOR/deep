@@ -283,10 +283,7 @@ async fn main() {
                         return;
                     }
                 };
-                // TODO: why not use dwonload_wrapper here
-                if let Err(err) = download(&url, dir, content.as_bytes(), true).await {
-                    eprintln!("\x1b[1;91mError downloading\x1b[0m {} {err}", &url);
-                }
+                download_wrapper(&url, dir, content.as_bytes(), true).await;
 
                 let doc = Html::parse_document(&content);
                 let selector = Selector::parse("a[href]").unwrap();
