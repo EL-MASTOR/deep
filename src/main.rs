@@ -3,11 +3,12 @@ use std::{
     env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
 };
 
+use bincode::{deserialize, serialize};
 use dashmap::DashSet;
 use reqwest::{Client, Error, StatusCode};
 use scraper::{Html, Selector};
 use tokio::{
-    fs,
+    fs::{self, read},
     sync::mpsc::{self, Receiver, Sender},
     task::{self, JoinSet},
     time::sleep,
@@ -100,9 +101,16 @@ async fn fetch(
     Ok(FetchedContent::VectContent(content))
 }
 
-async fn download_wrapper<T: AsRef<[u8]>>(url: &Url, dir: Arc<String>, content: T, pages: bool) {
+async fn download_wrapper<T: AsRef<[u8]>>(
+    url: &Url,
+    dir: Arc<String>,
+    content: T,
+    pages: bool,
+    fail_safe: Arc<DashSet<String>>,
+) {
     if let Err(err) = download(&url, dir, content, pages).await {
         eprintln!("\x1b[1;91mError downloading\x1b[0m {} {err}", &url);
+        fail_safe.insert(url.to_string());
     }
 }
 
@@ -112,6 +120,7 @@ async fn download_resources(
     dir: &Arc<String>,
     bytes: bool,
     duration: u64,
+    failed: &Arc<DashSet<String>>,
 ) {
     let total = rx.len();
     let mut progress = 0;
@@ -128,6 +137,7 @@ async fn download_resources(
         }
         let c = client.clone();
         let dir = dir.clone();
+        let fail = failed.clone();
         progress += 1;
         set.spawn(async move {
             let url_str = url.as_str();
@@ -136,21 +146,29 @@ async fn download_resources(
                 println!("\x1b[96m{}/{}\x1b[0m {}", progress, total, url_str);
                 match content {
                     FetchedContent::StringContent(value) => {
-                        download_wrapper(&url, dir, value, false).await
+                        download_wrapper(&url, dir, value, false, fail).await
                     }
                     FetchedContent::VectContent(value) => {
-                        download_wrapper(&url, dir, value, false).await
+                        download_wrapper(&url, dir, value, false, fail).await
                     }
                 };
             } else if let Err(FetchError::StatusCode(status)) = fetched_content {
-                eprintln!(
-                    "\x1b[1;91m{}\x1b[0m \x1b[96m{}/{}\x1b[0m {}",
-                    status, progress, total, url_str
+                fail_log(
+                    format!(
+                        "\x1b[1;91m{}\x1b[0m \x1b[96m{}/{}\x1b[0m {}",
+                        status, progress, total, url_str
+                    ),
+                    fail,
+                    url,
                 );
             } else if let Err(FetchError::ReqwestError(err)) = fetched_content {
-                eprintln!(
-                    "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}/{}\x1b[0m {}, {}",
-                    progress, total, url_str, err
+                fail_log(
+                    format!(
+                        "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}/{}\x1b[0m {}, {}",
+                        progress, total, url_str, err
+                    ),
+                    fail,
+                    url,
                 );
             }
         });
@@ -161,6 +179,26 @@ async fn download_resources(
 fn exit_code_1(msg: String) -> ! {
     eprintln!("{}", msg);
     exit(1)
+}
+
+fn fail_log(msg: String, failed: Arc<DashSet<String>>, url: Url) {
+    eprintln!("{}", msg);
+    failed.insert(url.to_string());
+}
+
+fn stringify_urls(urls_set: Arc<DashSet<String>>, init: String) -> String {
+    urls_set.iter().fold(init, |acc, x| acc + x.as_str() + "\n")
+}
+
+async fn deserialize_file(log_file: &str) -> String {
+    if let Ok(log) = read(Path::new(log_file)).await {
+        deserialize::<String>(&log).unwrap()
+    } else {
+        exit_code_1(format!(
+            "Error occured while attempting to read ./{}. Does this file exist?",
+            log_file
+        ))
+    }
 }
 
 #[tokio::main]
@@ -175,6 +213,9 @@ async fn main() {
     let js_css_tx = Arc::new(js_css_tx);
     let client = Arc::new(Client::new());
     let urls = Arc::new(DashSet::new());
+    let failed = Arc::new(DashSet::new());
+    let f_imgs = Arc::new(DashSet::new());
+    let f_js_css = Arc::new(DashSet::new());
 
     let mut arguments: Vec<String> = args().collect();
     let duration = if arguments.len() == 5 {
@@ -187,60 +228,89 @@ async fn main() {
     } else {
         0
     };
-    let args = match arguments.len() {
-        4 => {
-            let d = arguments.remove(3);
-            let b = arguments.remove(2);
-            let u = arguments.remove(1);
-            [u, b, d]
+    let [dir, base_url] = if arguments.len() == 2 && arguments[1] == "-a" {
+        let missed_urls = deserialize_file("failed-log.bin").await;
+        let visited_urls = deserialize_file("visited-log-urls.bin").await;
+        for v in visited_urls.lines() {
+            urls.insert(v.to_string());
         }
-        _ => {
-            exit_code_1(format!("Usage: {} url base dir", arguments[0]));
+        let mut categories = missed_urls.split("----");
+        let base_url = Arc::new(categories.next().unwrap().to_string());
+        for c in categories {
+            let the_tx = if c.starts_with("js_css\n") {
+                &js_css_tx
+            } else if c.starts_with("imgs\n") {
+                &imgs_tx
+            } else {
+                &tx
+            };
+            let mut missed_urls = c.lines();
+            missed_urls.next();
+            for url in missed_urls {
+                if let Err(_) = the_tx.send(Url::parse(url).unwrap()).await {
+                    exit_code_1(format!("Receiver dropped"));
+                }
+            }
         }
-    };
-
-    let [url, dir, base] = args;
-
-    let dir = Arc::new(dir);
-
-    let base_index = if let Ok(bi) = base.parse() {
-        bi
+        [Arc::new(String::from(".")), base_url]
     } else {
-        exit_code_1(format!("{} is invalid argument", base)); // TODO: clearify that this is yhe
-                                                              // base argument
-    };
-
-    let url = if let Ok(url) = Url::parse(&url) {
-        url
-    } else {
-        exit_code_1(format!("the url is not valid"));
-    };
-
-    let d = &*dir;
-    if let Ok(false) = fs::try_exists(d).await {
-        if let Err(err) = fs::create_dir(d).await {
-            exit_code_1(format!("err creating {d}: {err}"));
+        let args = match arguments.len() {
+            4 => {
+                let d = arguments.remove(3);
+                let b = arguments.remove(2);
+                let u = arguments.remove(1);
+                [u, b, d]
+            }
+            _ => {
+                exit_code_1(format!("Usage: {} url base dir", arguments[0]));
+            }
         };
-    }
 
-    let p = Path::new(url.path()).iter().take(base_index + 1);
-    if p.clone().count() <= base_index {
-        exit_code_1(format!("url path is less than base {}", base_index));
-    }
+        let [url, dir, base] = args;
 
-    let base_path = p.fold("".to_string(), |acc, e| {
-        let slash = if e == "/" || acc == "/" { "" } else { "/" };
-        acc + slash + e.to_str().unwrap()
-    }) + if base_index == 0 { "" } else { "/" }; // TODO: can I make the 'fold' method above include this trailig '/' I added in this
-                                                 // line. Solving thr bug of (base: "http://xxx/a", urls :["http://xxx/a/b";"http://xxx/ab/b"...]).
-                                                 // Create a new stash and new commit for this bug fix.
-    let base_url = url.join(&base_path).unwrap().to_string();
-    let base_url = Arc::new(base_url);
+        let dir = Arc::new(dir);
 
-    urls.insert(url.to_string());
-    if let Err(_) = tx.clone().send(url).await {
-        exit_code_1(format!("Receiver dropped"));
-    }
+        let base_index = if let Ok(bi) = base.parse() {
+            bi
+        } else {
+            exit_code_1(format!("{} is invalid argument", base)); // TODO: clearify that this is yhe
+                                                                  // base argument
+        };
+
+        let url = if let Ok(url) = Url::parse(&url) {
+            url
+        } else {
+            exit_code_1(format!("the url is not valid"));
+        };
+
+        let d = &*dir;
+        if let Ok(false) = fs::try_exists(d).await {
+            if let Err(err) = fs::create_dir(d).await {
+                exit_code_1(format!("err creating {d}: {err}"));
+            };
+        }
+
+        let p = Path::new(url.path()).iter().take(base_index + 1);
+        if p.clone().count() <= base_index {
+            exit_code_1(format!("url path is less than base {}", base_index));
+        }
+
+        let base_path = p.fold("".to_string(), |acc, e| {
+            let slash = if e == "/" || acc == "/" { "" } else { "/" };
+            acc + slash + e.to_str().unwrap()
+        }) + if base_index == 0 { "" } else { "/" }; // TODO: can I make the 'fold' method above include this trailig '/' I added in this
+                                                     // line. Solving thr bug of (base: "http://xxx/a", urls :["http://xxx/a/b";"http://xxx/ab/b"...]).
+                                                     // Create a new stash and new commit for this bug fix.
+        let base_url = url.join(&base_path).unwrap().to_string();
+        let base_url = Arc::new(base_url);
+
+        urls.insert(url.to_string());
+        // WARN: tx.clone() here is not necessary, so I removed it from the `cargo run -- -a` block above, but it could affect Arc::strong_count, test it before removing it here.
+        if let Err(_) = tx.clone().send(url).await {
+            exit_code_1(format!("Receiver dropped"));
+        }
+        [dir, base_url]
+    };
 
     let mut set = JoinSet::new();
     while let Some(url) = rx.recv().await {
@@ -251,6 +321,7 @@ async fn main() {
         let urls = Arc::clone(&urls);
         let base_url = Arc::clone(&base_url);
         let dir = Arc::clone(&dir);
+        let fail = Arc::clone(&failed);
 
         if duration != 0 {
             sleep(Duration::from_millis(duration)).await;
@@ -264,26 +335,34 @@ async fn main() {
                 let content = match fetched_content {
                     Ok(c) => c.as_str(),
                     Err(FetchError::StatusCode(status)) => {
-                        eprintln!(
-                            "\x1b[1;91m{status}\x1b[0m \x1b[96m{}\x1b[0m {}",
-                            Arc::strong_count(&sender) - 1,
-                            url_str
+                        fail_log(
+                            format!(
+                                "\x1b[1;91m{status}\x1b[0m \x1b[96m{}\x1b[0m {}",
+                                Arc::strong_count(&sender) - 1,
+                                url_str
+                            ),
+                            fail,
+                            url,
                         );
                         decrement(sender);
                         return;
                     }
                     Err(FetchError::ReqwestError(err)) => {
-                        eprintln!(
-                            "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}\x1b[0m {}, {}",
-                            Arc::strong_count(&sender) - 1,
-                            url_str,
-                            err
+                        fail_log(
+                            format!(
+                                "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}\x1b[0m {}, {}",
+                                Arc::strong_count(&sender) - 1,
+                                url_str,
+                                err
+                            ),
+                            fail,
+                            url,
                         );
                         decrement(sender);
                         return;
                     }
                 };
-                download_wrapper(&url, dir, content.as_bytes(), true).await;
+                download_wrapper(&url, dir, content.as_bytes(), true, fail).await;
 
                 let doc = Html::parse_document(&content);
                 let selector = Selector::parse("a[href]").unwrap();
@@ -372,8 +451,26 @@ async fn main() {
     drop(js_css_tx);
     drop(imgs_tx);
 
-    download_resources(&mut js_css_rx, &client, &dir, false, duration).await;
-    download_resources(&mut imgs_rx, &client, &dir, true, duration).await;
+    download_resources(&mut js_css_rx, &client, &dir, false, duration, &f_js_css).await;
+    download_resources(&mut imgs_rx, &client, &dir, true, duration, &f_imgs).await;
+
+    let string_urls = stringify_urls(urls, String::new());
+    let failed_urls = stringify_urls(failed, base_url.to_string() + "\n----\n");
+    let failed_js_css_urls = stringify_urls(f_js_css, String::from("----js_css\n"));
+    let failed_imgs_urls = stringify_urls(f_imgs, String::from("----imgs\n"));
+
+    fs::write(
+        dir.to_string() + "/visited-log-urls.bin",
+        serialize(&string_urls).unwrap(),
+    )
+    .await
+    .unwrap();
+    fs::write(
+        dir.to_string() + "/failed-log.bin",
+        serialize(&(failed_urls + &failed_js_css_urls + &failed_imgs_urls)).unwrap(),
+    )
+    .await
+    .unwrap();
 
     println!("\x1b[1;93mdone\x1b[0m");
 }
