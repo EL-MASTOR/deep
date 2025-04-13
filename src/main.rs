@@ -298,15 +298,12 @@ async fn main() {
         let base_path = p.fold("".to_string(), |acc, e| {
             let slash = if e == "/" || acc == "/" { "" } else { "/" };
             acc + slash + e.to_str().unwrap()
-        }) + if base_index == 0 { "" } else { "/" }; // TODO: can I make the 'fold' method above include this trailig '/' I added in this
-                                                     // line. Solving thr bug of (base: "http://xxx/a", urls :["http://xxx/a/b";"http://xxx/ab/b"...]).
-                                                     // Create a new stash and new commit for this bug fix.
+        }) + if base_index == 0 { "" } else { "/" };
         let base_url = url.join(&base_path).unwrap().to_string();
         let base_url = Arc::new(base_url);
 
         urls.insert(url.to_string());
-        // WARN: tx.clone() here is not necessary, so I removed it from the `cargo run -- -a` block above, but it could affect Arc::strong_count, test it before removing it here.
-        if let Err(_) = tx.clone().send(url).await {
+        if let Err(_) = tx.send(url).await {
             exit_code_1(format!("Receiver dropped"));
         }
         [dir, base_url]
@@ -369,7 +366,7 @@ async fn main() {
                 let img_selector = Selector::parse("img[src]").unwrap();
                 let js_selector = Selector::parse("script[src]").unwrap();
                 let css_selector = Selector::parse("link[rel=\"stylesheet\"]").unwrap();
-                let element_groups = [
+                let mut element_groups = [
                     doc.select(&img_selector),
                     doc.select(&js_selector),
                     doc.select(&css_selector),
@@ -379,7 +376,8 @@ async fn main() {
                 let mut vecs = [vec![], vec![], vec![], vec![]];
                 for i in 0..4 {
                     let link_attr = if i < 2 { "src" } else { "href" };
-                    for element in element_groups[i].clone() {
+                    // NOTE: I made this &mut, so we don't clone it.
+                    for element in &mut element_groups[i] {
                         if let Some(attr) = element.value().attr(link_attr) {
                             if let Ok(link) = url.join(attr) {
                                 vecs[i].push(link)
