@@ -216,10 +216,11 @@ async fn main() {
     let failed = Arc::new(DashSet::new());
     let f_imgs = Arc::new(DashSet::new());
     let f_js_css = Arc::new(DashSet::new());
+    let ignore: Arc<Vec<String>>;
 
     let mut arguments: Vec<String> = args().collect();
-    let duration = if arguments.len() == 5 {
-        let delay = arguments.pop().unwrap();
+    let duration = if arguments.len() >= 5 && arguments[4] != "-i" {
+        let delay = arguments.remove(4);
         if let Ok(d) = delay.parse() {
             d
         } else {
@@ -229,13 +230,19 @@ async fn main() {
         0
     };
     let [dir, base_url] = if arguments.len() == 2 && arguments[1] == "-a" {
-        let missed_urls = deserialize_file("failed-log.bin").await;
-        let visited_urls = deserialize_file("visited-log-urls.bin").await;
+        let mut to_ignore = Vec::<String>::new();
+        let missed_urls = deserialize_file("failsafe-log.bin").await;
+        let visited_urls = deserialize_file("visited-log.bin").await;
         for v in visited_urls.lines() {
             urls.insert(v.to_string());
         }
         let mut categories = missed_urls.split("----");
-        let base_url = Arc::new(categories.next().unwrap().to_string());
+        let base_url = Arc::new(categories.next().unwrap().trim_end().to_string());
+        let ignored_links = categories.next().unwrap().lines();
+        for ignored in ignored_links {
+            to_ignore.push(ignored.to_string());
+        }
+        ignore = Arc::new(to_ignore);
         for c in categories {
             let the_tx = if c.starts_with("js_css\n") {
                 &js_css_tx
@@ -254,11 +261,21 @@ async fn main() {
         }
         [Arc::new(String::from(".")), base_url]
     } else {
+        let mut to_ignore = Vec::new();
         let args = match arguments.len() {
-            4 => {
+            4.. => {
                 let d = arguments.remove(3);
                 let b = arguments.remove(2);
                 let u = arguments.remove(1);
+                if arguments.len() > 2 {
+                    if arguments[1] == "-i" {
+                        arguments.remove(1);
+                        to_ignore = arguments;
+                        to_ignore.remove(0);
+                    } else {
+                        exit_code_1(format!("Usage: {} url base dir", arguments[0]));
+                    }
+                }
                 [u, b, d]
             }
             _ => {
@@ -302,6 +319,11 @@ async fn main() {
         let base_url = url.join(&base_path).unwrap().to_string();
         let base_url = Arc::new(base_url);
 
+        for ignored in to_ignore.iter_mut() {
+            *ignored = base_url.to_string() + ignored;
+        }
+        ignore = Arc::new(to_ignore);
+
         urls.insert(url.to_string());
         if let Err(_) = tx.send(url).await {
             exit_code_1(format!("Receiver dropped"));
@@ -319,6 +341,7 @@ async fn main() {
         let base_url = Arc::clone(&base_url);
         let dir = Arc::clone(&dir);
         let fail = Arc::clone(&failed);
+        let ignored = Arc::clone(&ignore);
 
         if duration != 0 {
             sleep(Duration::from_millis(duration)).await;
@@ -413,7 +436,7 @@ async fn main() {
             }
 
             let mut sent = false;
-            for link in &vecs[3] {
+            'outer: for link in &vecs[3] {
                 let path = link.path();
                 let link = if let Ok(joined_link) = link.join(path) {
                     joined_link
@@ -424,7 +447,13 @@ async fn main() {
 
                 let contained = !urls.contains(&l);
                 if l.starts_with(&*base_url) && contained {
-                    urls.insert(l);
+                    // PERF: urls contains unvisited `ignored` matched urls urls also. So this for loop isn't repeated.
+                    urls.insert(l.clone());
+                    for item in &*ignored {
+                        if l.starts_with(item) {
+                            continue 'outer;
+                        }
+                    }
                     if let Err(_) = sender.send(link).await {
                         eprintln!("Receiver dropped") //returns here.
                     }
@@ -453,18 +482,26 @@ async fn main() {
     download_resources(&mut imgs_rx, &client, &dir, true, duration, &f_imgs).await;
 
     let string_urls = stringify_urls(urls, String::new());
-    let failed_urls = stringify_urls(failed, base_url.to_string() + "\n----\n");
+    let failed_urls = stringify_urls(
+        failed,
+        base_url.to_string()
+            + "\n----"
+            + &ignore
+                .iter()
+                .fold(String::new(), |acc, x| acc + x.as_str() + "\n")
+            + "----\n",
+    );
     let failed_js_css_urls = stringify_urls(f_js_css, String::from("----js_css\n"));
     let failed_imgs_urls = stringify_urls(f_imgs, String::from("----imgs\n"));
 
     fs::write(
-        dir.to_string() + "/visited-log-urls.bin",
+        dir.to_string() + "/visited-log.bin",
         serialize(&string_urls).unwrap(),
     )
     .await
     .unwrap();
     fs::write(
-        dir.to_string() + "/failed-log.bin",
+        dir.to_string() + "/failsafe-log.bin",
         serialize(&(failed_urls + &failed_js_css_urls + &failed_imgs_urls)).unwrap(),
     )
     .await
