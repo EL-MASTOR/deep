@@ -213,9 +213,9 @@ async fn main() {
     let js_css_tx = Arc::new(js_css_tx);
     let client = Arc::new(Client::new());
     let urls = Arc::new(DashSet::new());
-    let failed = Arc::new(DashSet::new());
-    let f_imgs = Arc::new(DashSet::new());
-    let f_js_css = Arc::new(DashSet::new());
+    let failed = urls.clone();
+    let f_imgs = urls.clone();
+    let f_js_css = urls.clone();
     let ignore: Arc<Vec<String>>;
 
     let mut arguments: Vec<String> = args().collect();
@@ -445,8 +445,8 @@ async fn main() {
                 };
                 let l = link.to_string();
 
-                let contained = !urls.contains(&l);
-                if l.starts_with(&*base_url) && contained {
+                let contained = urls.contains(&l);
+                if l.starts_with(&*base_url) && !contained {
                     // PERF: urls contains unvisited `ignored` matched urls urls also. So this for loop isn't repeated.
                     urls.insert(l.clone());
                     for item in &*ignored {
