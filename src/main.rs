@@ -2,7 +2,7 @@ use core::{panic, result::Result};
 use std::{
     env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
 };
-
+// TODO: use a simple text file instead of using bincode as there is no clear adventage of bincode.
 use bincode::{deserialize, serialize};
 use dashmap::DashSet;
 use reqwest::{Client, Error, StatusCode};
@@ -203,19 +203,19 @@ async fn deserialize_file(log_file: &str) -> String {
 
 #[tokio::main]
 async fn main() {
-    let (tx, mut rx) = mpsc::channel(1000); // TEST: this with 5 or so.
-    let (imgs_tx, mut imgs_rx) = mpsc::channel(10000); // TODO: warn about this in this limit in the
-                                                       // readme. But check if there's any
-                                                       // downsides for encreasing this value
-    let (js_css_tx, mut js_css_rx) = mpsc::channel(10000);
+    let (tx, mut rx) = mpsc::channel(1000000); // TEST: this with 5 or so.
+    let (imgs_tx, mut imgs_rx) = mpsc::channel(1000000); // TODO: warn about this in this limit in the
+                                                         // readme. But check if there's any
+                                                         // downsides for encreasing this value
+    let (js_css_tx, mut js_css_rx) = mpsc::channel(1000000);
     let tx = Arc::new(tx);
     let imgs_tx = Arc::new(imgs_tx);
     let js_css_tx = Arc::new(js_css_tx);
     let client = Arc::new(Client::new());
     let urls = Arc::new(DashSet::new());
-    let failed = urls.clone();
-    let f_imgs = urls.clone();
-    let f_js_css = urls.clone();
+    let failed = Arc::new(DashSet::new());
+    let f_imgs = Arc::new(DashSet::new());
+    let f_js_css = Arc::new(DashSet::new());
     let ignore: Arc<Vec<String>>;
 
     let mut arguments: Vec<String> = args().collect();
@@ -485,7 +485,7 @@ async fn main() {
     let failed_urls = stringify_urls(
         failed,
         base_url.to_string()
-            + "\n----"
+            + "\n----\n"
             + &ignore
                 .iter()
                 .fold(String::new(), |acc, x| acc + x.as_str() + "\n")
