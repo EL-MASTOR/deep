@@ -1,14 +1,12 @@
 use core::{panic, result::Result};
-use std::{
-    env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
-};
-// TODO: use a simple text file instead of using bincode as there is no clear adventage of bincode.
-use bincode::{deserialize, serialize};
 use dashmap::DashSet;
 use reqwest::{Client, Error, StatusCode};
 use scraper::{Html, Selector};
+use std::{
+    env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
+};
 use tokio::{
-    fs::{self, read},
+    fs::{self, read_to_string},
     sync::mpsc::{self, Receiver, Sender},
     task::{self, JoinSet},
     time::sleep,
@@ -190,9 +188,9 @@ fn stringify_urls(urls_set: Arc<DashSet<String>>, init: String) -> String {
     urls_set.iter().fold(init, |acc, x| acc + x.as_str() + "\n")
 }
 
-async fn deserialize_file(log_file: &str) -> String {
-    if let Ok(log) = read(Path::new(log_file)).await {
-        deserialize::<String>(&log).unwrap()
+async fn read_file(log_file: &str) -> String {
+    if let Ok(log) = read_to_string(Path::new(log_file)).await {
+        log
     } else {
         exit_code_1(format!(
             "Error occured while attempting to read ./{}. Does this file exist?",
@@ -231,8 +229,8 @@ async fn main() {
     };
     let [dir, base_url] = if arguments.len() == 2 && arguments[1] == "-a" {
         let mut to_ignore = Vec::<String>::new();
-        let missed_urls = deserialize_file("failsafe-log.bin").await;
-        let visited_urls = deserialize_file("visited-log.bin").await;
+        let missed_urls = read_file("failsafe.log").await;
+        let visited_urls = read_file("visited.log").await;
         for v in visited_urls.lines() {
             urls.insert(v.to_string());
         }
@@ -331,6 +329,9 @@ async fn main() {
         [dir, base_url]
     };
 
+    if rx.is_empty() {
+        rx.close();
+    }
     let mut set = JoinSet::new();
     while let Some(url) = rx.recv().await {
         let c = client.clone();
@@ -494,15 +495,12 @@ async fn main() {
     let failed_js_css_urls = stringify_urls(f_js_css, String::from("----js_css\n"));
     let failed_imgs_urls = stringify_urls(f_imgs, String::from("----imgs\n"));
 
+    fs::write(dir.to_string() + "/visited.log", string_urls)
+        .await
+        .unwrap();
     fs::write(
-        dir.to_string() + "/visited-log.bin",
-        serialize(&string_urls).unwrap(),
-    )
-    .await
-    .unwrap();
-    fs::write(
-        dir.to_string() + "/failsafe-log.bin",
-        serialize(&(failed_urls + &failed_js_css_urls + &failed_imgs_urls)).unwrap(),
+        dir.to_string() + "/failsafe.log",
+        failed_urls + &failed_js_css_urls + &failed_imgs_urls,
     )
     .await
     .unwrap();
