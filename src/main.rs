@@ -199,13 +199,13 @@ async fn read_file(log_file: &str) -> String {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let (tx, mut rx) = mpsc::channel(1000000); // TEST: this with 5 or so.
-    let (imgs_tx, mut imgs_rx) = mpsc::channel(1000000); // TODO: warn about this in this limit in the
-                                                         // readme. But check if there's any
-                                                         // downsides for encreasing this value
-    let (js_css_tx, mut js_css_rx) = mpsc::channel(1000000);
+pub async fn rs() {
+    // TODO: try unbounded_channel
+    let (tx, mut rx) = mpsc::channel(10000000); // TEST: this with 5 or so.
+    let (imgs_tx, mut imgs_rx) = mpsc::channel(10000000); // TODO: warn about this in this limit in the
+                                                          // readme. But check if there's any
+                                                          // downsides for encreasing this value
+    let (js_css_tx, mut js_css_rx) = mpsc::channel(10000000);
     let tx = Arc::new(tx);
     let imgs_tx = Arc::new(imgs_tx);
     let js_css_tx = Arc::new(js_css_tx);
@@ -217,8 +217,12 @@ async fn main() {
     let ignore: Arc<Vec<String>>;
 
     let mut arguments: Vec<String> = args().collect();
-    let duration = if arguments.len() >= 5 && arguments[4] != "-i" {
-        let delay = arguments.remove(4);
+    let retrying = arguments.len() == 3 && arguments[1] == "-a"; //the number of arguments supplied should
+                                                                 //not exceed 2 elements. Otherwise
+                                                                 //this wouldn't work.
+    let duration = if (arguments.len() >= 5 && arguments[4] != "-i") || retrying {
+        let idx = if retrying { 2 } else { 4 };
+        let delay = arguments.remove(idx);
         if let Ok(d) = delay.parse() {
             d
         } else {
@@ -334,7 +338,9 @@ async fn main() {
     }
     let mut set = JoinSet::new();
     while let Some(url) = rx.recv().await {
+        println!("1,{}", &url);
         let c = client.clone();
+        // println!("2,{}", &url);
         let sender = Arc::clone(&tx);
         let imgs_sender = Arc::clone(&imgs_tx);
         let js_css_sender = Arc::clone(&js_css_tx);
@@ -343,19 +349,23 @@ async fn main() {
         let dir = Arc::clone(&dir);
         let fail = Arc::clone(&failed);
         let ignored = Arc::clone(&ignore);
+        // println!("3,{}", &url);
 
         if duration != 0 {
             sleep(Duration::from_millis(duration)).await;
         }
 
         set.spawn(async move {
+            println!("4,{}", &url);
             let url_str = url.as_str();
 
             let vecs = {
                 let fetched_content = fetch(url_str, c, false, true).await;
+                println!("5,{}", &url);
                 let content = match fetched_content {
                     Ok(c) => c.as_str(),
                     Err(FetchError::StatusCode(status)) => {
+                        println!("6,{}", &url);
                         fail_log(
                             format!(
                                 "\x1b[1;91m{status}\x1b[0m \x1b[96m{}\x1b[0m {}",
@@ -365,10 +375,13 @@ async fn main() {
                             fail,
                             url,
                         );
+                        println!("6.2",);
                         decrement(sender);
+                        println!("6.3",);
                         return;
                     }
                     Err(FetchError::ReqwestError(err)) => {
+                        println!("6.4, {}", &url);
                         fail_log(
                             format!(
                                 "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}\x1b[0m {}, {}",
@@ -379,12 +392,16 @@ async fn main() {
                             fail,
                             url,
                         );
+                        println!("6.5,",);
                         decrement(sender);
+                        println!("6.6, ");
                         return;
                     }
                 };
+                println!("7,{}", &url);
                 download_wrapper(&url, dir, content.as_bytes(), true, fail).await;
 
+                println!("8,{}", &url);
                 let doc = Html::parse_document(&content);
                 let selector = Selector::parse("a[href]").unwrap();
                 let img_selector = Selector::parse("img[src]").unwrap();
@@ -396,6 +413,7 @@ async fn main() {
                     doc.select(&css_selector),
                     doc.select(&selector),
                 ];
+                println!("9,{}", &url);
 
                 let mut vecs = [vec![], vec![], vec![], vec![]];
                 for i in 0..4 {
@@ -409,9 +427,11 @@ async fn main() {
                         }
                     }
                 }
+                println!("10,{}", &url);
                 vecs
             };
 
+            println!("11,{}", &url);
             for img_src in &vecs[0] {
                 let src = img_src.to_string();
                 if !urls.contains(&src) {
@@ -421,6 +441,7 @@ async fn main() {
                     }
                 }
             }
+            println!("12,{}", &url);
 
             // &vecs[1..2] causes a segmentation fault
             for links in &vecs[1..3] {
@@ -435,6 +456,7 @@ async fn main() {
                     }
                 }
             }
+            println!("13,{}", &url);
 
             let mut sent = false;
             'outer: for link in &vecs[3] {
@@ -461,6 +483,7 @@ async fn main() {
                     sent = true;
                 }
             }
+            println!("14,{}", &url);
 
             println!(
                 "\x1b[96m{}\x1b[0m {}",
@@ -468,7 +491,15 @@ async fn main() {
                 url_str
             );
 
+            println!(
+                "15,{}, {}, {}, {}",
+                &url,
+                sender.capacity(),
+                sender.strong_count(),
+                sender.weak_count(),
+            );
             if Arc::strong_count(&sender) == 2 && !sent {
+                println!("16,{}", &url);
                 task::yield_now().await;
                 decrement(sender);
             }
