@@ -17,14 +17,14 @@ async fn download<T: AsRef<[u8]>>(
     url: &Url,
     dir: Arc<String>,
     content: T,
-    pages: bool,
+    is_html: bool,
 ) -> io_result<()> {
     let the_fn = url.path();
     let path = Path::new(the_fn);
     let dir = dir.to_string();
     let mut tail_dir = String::from("/");
     let mut final_path = dir.to_owned() + the_fn;
-    if pages && !the_fn.ends_with(".html") {
+    if is_html && !the_fn.ends_with(".html") {
         tail_dir = tail_dir + path.file_name().unwrap().to_str().unwrap();
         final_path = final_path + "/index.html";
     }
@@ -55,7 +55,7 @@ enum FetchError {
 }
 
 enum FetchedContent {
-    StringContent(String),
+    StringContent((bool, String)),
     VectContent(Vec<u8>),
 }
 
@@ -66,12 +66,18 @@ impl From<Error> for FetchError {
 }
 
 impl FetchedContent {
-    fn as_str(self) -> String {
+    fn text_string(self) -> String {
         match self {
-            Self::StringContent(s) => s,
+            Self::StringContent(s) => s.1,
             Self::VectContent(_) => {
                 panic!("Called as_str() on an FetchedContent::VectContent variant")
             }
+        }
+    }
+    fn is_html(&self) -> bool {
+        match self {
+            Self::StringContent(s) => s.0,
+            Self::VectContent(_) => false,
         }
     }
 }
@@ -87,12 +93,18 @@ async fn fetch(
     if status != StatusCode::OK {
         return Err(FetchError::StatusCode(status));
     }
+    let content_type = res.headers().get("content-type").unwrap();
+    let is_html = if content_type == "text/html" {
+        true
+    } else {
+        false
+    };
     let content = if bytes {
         (&*res.bytes().await?).to_vec()
     } else {
         let dom = res.text().await?;
         if pages {
-            return Ok(FetchedContent::StringContent(dom));
+            return Ok(FetchedContent::StringContent((is_html, dom)));
         }
         dom.into_bytes()
     };
@@ -103,10 +115,10 @@ async fn download_wrapper<T: AsRef<[u8]>>(
     url: &Url,
     dir: Arc<String>,
     content: T,
-    pages: bool,
+    is_html: bool,
     fail_safe: Arc<DashSet<String>>,
 ) {
-    if let Err(err) = download(&url, dir, content, pages).await {
+    if let Err(err) = download(&url, dir, content, is_html).await {
         eprintln!("\x1b[1;91mError downloading\x1b[0m {} {err}", &url);
         fail_safe.insert(url.to_string());
     }
@@ -144,7 +156,7 @@ async fn download_resources(
                 println!("\x1b[96m{}/{}\x1b[0m {}", progress, total, url_str);
                 match content {
                     FetchedContent::StringContent(value) => {
-                        download_wrapper(&url, dir, value, false, fail).await
+                        download_wrapper(&url, dir, value.1, value.0, fail).await
                     }
                     FetchedContent::VectContent(value) => {
                         download_wrapper(&url, dir, value, false, fail).await
@@ -199,7 +211,8 @@ async fn read_file(log_file: &str) -> String {
     }
 }
 
-pub async fn rs() {
+#[tokio::main]
+async fn main() {
     // TODO: try unbounded_channel
     let (tx, mut rx) = mpsc::channel(10000000); // TEST: this with 5 or so.
     let (imgs_tx, mut imgs_rx) = mpsc::channel(10000000); // TODO: warn about this in this limit in the
@@ -338,9 +351,7 @@ pub async fn rs() {
     }
     let mut set = JoinSet::new();
     while let Some(url) = rx.recv().await {
-        println!("1,{}", &url);
         let c = client.clone();
-        // println!("2,{}", &url);
         let sender = Arc::clone(&tx);
         let imgs_sender = Arc::clone(&imgs_tx);
         let js_css_sender = Arc::clone(&js_css_tx);
@@ -349,23 +360,23 @@ pub async fn rs() {
         let dir = Arc::clone(&dir);
         let fail = Arc::clone(&failed);
         let ignored = Arc::clone(&ignore);
-        // println!("3,{}", &url);
 
         if duration != 0 {
             sleep(Duration::from_millis(duration)).await;
         }
 
         set.spawn(async move {
-            println!("4,{}", &url);
             let url_str = url.as_str();
 
             let vecs = {
                 let fetched_content = fetch(url_str, c, false, true).await;
-                println!("5,{}", &url);
+                let is_html;
                 let content = match fetched_content {
-                    Ok(c) => c.as_str(),
+                    Ok(c) => {
+                        is_html = c.is_html();
+                        c.text_string()
+                    }
                     Err(FetchError::StatusCode(status)) => {
-                        println!("6,{}", &url);
                         fail_log(
                             format!(
                                 "\x1b[1;91m{status}\x1b[0m \x1b[96m{}\x1b[0m {}",
@@ -375,13 +386,10 @@ pub async fn rs() {
                             fail,
                             url,
                         );
-                        println!("6.2",);
                         decrement(sender);
-                        println!("6.3",);
                         return;
                     }
                     Err(FetchError::ReqwestError(err)) => {
-                        println!("6.4, {}", &url);
                         fail_log(
                             format!(
                                 "\x1b[1;91mError downloading\x1b[0m \x1b[96m{}\x1b[0m {}, {}",
@@ -392,16 +400,12 @@ pub async fn rs() {
                             fail,
                             url,
                         );
-                        println!("6.5,",);
                         decrement(sender);
-                        println!("6.6, ");
                         return;
                     }
                 };
-                println!("7,{}", &url);
-                download_wrapper(&url, dir, content.as_bytes(), true, fail).await;
+                download_wrapper(&url, dir, content.as_bytes(), is_html, fail).await;
 
-                println!("8,{}", &url);
                 let doc = Html::parse_document(&content);
                 let selector = Selector::parse("a[href]").unwrap();
                 let img_selector = Selector::parse("img[src]").unwrap();
@@ -413,7 +417,6 @@ pub async fn rs() {
                     doc.select(&css_selector),
                     doc.select(&selector),
                 ];
-                println!("9,{}", &url);
 
                 let mut vecs = [vec![], vec![], vec![], vec![]];
                 for i in 0..4 {
@@ -427,11 +430,9 @@ pub async fn rs() {
                         }
                     }
                 }
-                println!("10,{}", &url);
                 vecs
             };
 
-            println!("11,{}", &url);
             for img_src in &vecs[0] {
                 let src = img_src.to_string();
                 if !urls.contains(&src) {
@@ -441,7 +442,6 @@ pub async fn rs() {
                     }
                 }
             }
-            println!("12,{}", &url);
 
             // &vecs[1..2] causes a segmentation fault
             for links in &vecs[1..3] {
@@ -456,7 +456,6 @@ pub async fn rs() {
                     }
                 }
             }
-            println!("13,{}", &url);
 
             let mut sent = false;
             'outer: for link in &vecs[3] {
@@ -483,7 +482,6 @@ pub async fn rs() {
                     sent = true;
                 }
             }
-            println!("14,{}", &url);
 
             println!(
                 "\x1b[96m{}\x1b[0m {}",
@@ -491,15 +489,7 @@ pub async fn rs() {
                 url_str
             );
 
-            println!(
-                "15,{}, {}, {}, {}",
-                &url,
-                sender.capacity(),
-                sender.strong_count(),
-                sender.weak_count(),
-            );
             if Arc::strong_count(&sender) == 2 && !sent {
-                println!("16,{}", &url);
                 task::yield_now().await;
                 decrement(sender);
             }
