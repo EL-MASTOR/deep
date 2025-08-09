@@ -214,7 +214,7 @@ async fn read_file(log_file: &str) -> String {
 #[tokio::main]
 async fn main() {
     // TODO: try unbounded_channel
-    let (tx, mut rx) = mpsc::channel(10000000); // TEST: this with 5 or so.
+    let (tx, mut rx) = mpsc::channel(10000000);
     let (imgs_tx, mut imgs_rx) = mpsc::channel(10000000); // TODO: warn about this in this limit in the
                                                           // readme. But check if there's any
                                                           // downsides for encreasing this value
@@ -239,7 +239,10 @@ async fn main() {
         if let Ok(d) = delay.parse() {
             d
         } else {
-            exit_code_1(format!("{} is invalid argument", delay)); // TODO: clearify that this is yhe
+            exit_code_1(format!(
+                "'{}' is invalid argument. `FREQ` should be a number",
+                delay
+            ));
         }
     } else {
         0
@@ -269,14 +272,16 @@ async fn main() {
             let mut missed_urls = c.lines();
             missed_urls.next();
             for url in missed_urls {
-                if let Err(_) = the_tx.send(Url::parse(url).unwrap()).await {
-                    exit_code_1(format!("Receiver dropped"));
-                }
+                the_tx.send(Url::parse(url).unwrap()).await.unwrap();
             }
         }
         [Arc::new(String::from(".")), base_url]
     } else {
         let mut to_ignore = Vec::new();
+        let usage = format!(
+            "Usage:\n\t\x1b[1m\x1b[92m{}\x1b[39m URL DIR BASE [FREQ] [-i IGNORED]\x1b[0m\nor\n\t\x1b[1m\x1b[92m{}\x1b[39m -a [FREQ]\x1b[0m",
+            arguments[0], arguments[0]
+        );
         let args = match arguments.len() {
             4.. => {
                 let d = arguments.remove(3);
@@ -288,13 +293,13 @@ async fn main() {
                         to_ignore = arguments;
                         to_ignore.remove(0);
                     } else {
-                        exit_code_1(format!("Usage: {} url base dir", arguments[0]));
+                        exit_code_1(usage);
                     }
                 }
                 [u, b, d]
             }
             _ => {
-                exit_code_1(format!("Usage: {} url base dir", arguments[0]));
+                exit_code_1(usage);
             }
         };
 
@@ -305,14 +310,16 @@ async fn main() {
         let base_index = if let Ok(bi) = base.parse() {
             bi
         } else {
-            exit_code_1(format!("{} is invalid argument", base)); // TODO: clearify that this is yhe
-                                                                  // base argument
+            exit_code_1(format!(
+                "'{}' is invalid argument, `BASE` should be a number",
+                base
+            ));
         };
 
         let url = if let Ok(url) = Url::parse(&url) {
             url
         } else {
-            exit_code_1(format!("the url is not valid"));
+            exit_code_1(format!("invalid url"));
         };
 
         let d = &*dir;
@@ -323,8 +330,12 @@ async fn main() {
         }
 
         let p = Path::new(url.path()).iter().take(base_index + 1);
-        if p.clone().count() <= base_index {
-            exit_code_1(format!("url path is less than base {}", base_index));
+        let p_count = p.clone().count();
+        if p_count <= base_index {
+            exit_code_1(format!(
+                "url path components count is less than BASE: {} <= {}\ntry decreasing BASE",
+                p_count, base_index
+            ));
         }
 
         let base_path = p.fold("".to_string(), |acc, e| {
@@ -340,9 +351,7 @@ async fn main() {
         ignore = Arc::new(to_ignore);
 
         urls.insert(url.to_string());
-        if let Err(_) = tx.send(url).await {
-            exit_code_1(format!("Receiver dropped"));
-        }
+        tx.send(url).await.unwrap();
         [dir, base_url]
     };
 
@@ -437,9 +446,7 @@ async fn main() {
                 let src = img_src.to_string();
                 if !urls.contains(&src) {
                     urls.insert(src);
-                    if let Err(_) = imgs_sender.send(img_src.to_owned()).await {
-                        eprintln!("Receiver dropped") //returns here.
-                    }
+                    imgs_sender.send(img_src.to_owned()).await.unwrap();
                 }
             }
 
@@ -449,10 +456,7 @@ async fn main() {
                     let l = link.to_string();
                     if !urls.contains(&l) {
                         urls.insert(l);
-                        if let Err(_) = js_css_sender.send(link.to_owned()).await {
-                            // TODO: remove this if-let cause the server is garanteed to not be dropped
-                            eprintln!("Receiver dropped") //returns here.
-                        }
+                        js_css_sender.send(link.to_owned()).await.unwrap();
                     }
                 }
             }
@@ -476,9 +480,7 @@ async fn main() {
                             continue 'outer;
                         }
                     }
-                    if let Err(_) = sender.send(link).await {
-                        eprintln!("Receiver dropped") //returns here.
-                    }
+                    sender.send(link).await.unwrap();
                     sent = true;
                 }
             }
