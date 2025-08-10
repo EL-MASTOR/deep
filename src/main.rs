@@ -249,14 +249,15 @@ async fn main() {
     };
     let [dir, base_url] = if arguments.len() == 2 && arguments[1] == "-a" {
         let mut to_ignore = Vec::<String>::new();
-        let missed_urls = read_file("failsafe.log").await;
-        let visited_urls = read_file("visited.log").await;
+        let missed_urls = read_file("_deep-logs/failsafe.log").await;
+        let visited_urls = read_file("_deep-logs/visited.log").await;
         for v in visited_urls.lines() {
             urls.insert(v.to_string());
         }
         let mut categories = missed_urls.split("----");
-        let base_url = Arc::new(categories.next().unwrap().trim_end().to_string());
-        let ignored_links = categories.next().unwrap().lines();
+        let base_url = Arc::new({ &categories.next().unwrap().trim_end()[6..] }.to_owned());
+        let mut ignored_links = categories.next().unwrap().lines();
+        ignored_links.next().unwrap();
         for ignored in ignored_links {
             to_ignore.push(ignored.to_string());
         }
@@ -508,21 +509,26 @@ async fn main() {
     let string_urls = stringify_urls(urls, String::new());
     let failed_urls = stringify_urls(
         failed,
-        base_url.to_string()
-            + "\n----\n"
+        String::from("BASE: ")
+            + &base_url
+            + "\n----ignored\n"
             + &ignore
                 .iter()
                 .fold(String::new(), |acc, x| acc + x.as_str() + "\n")
-            + "----\n",
+            + "----failed\n",
     );
     let failed_js_css_urls = stringify_urls(f_js_css, String::from("----js_css\n"));
     let failed_imgs_urls = stringify_urls(f_imgs, String::from("----imgs\n"));
 
-    fs::write(dir.to_string() + "/visited.log", string_urls)
+    let deep_logs = dir.to_string() + "/_deep-logs";
+    if let Ok(false) = fs::try_exists(&deep_logs).await {
+        fs::create_dir(&deep_logs).await.unwrap();
+    }
+    fs::write(deep_logs.to_owned() + "/visited.log", string_urls)
         .await
         .unwrap();
     fs::write(
-        dir.to_string() + "/failsafe.log",
+        deep_logs + "/failsafe.log",
         failed_urls + &failed_js_css_urls + &failed_imgs_urls,
     )
     .await
