@@ -1,5 +1,3 @@
-`deep` creates a local version of a website by deeply diving into webpages to download the website's entire (not really) file tree, so you can interact with the website offline, written in Rust.
-
 I personally use it to download documentations for offline access, but it can be used with most websites out there.
 
 # Installation
