@@ -1,8 +1,9 @@
-`deep` is a web scraper that recursively downloads a web site with all of it sub pages as a tree, written in Rust.
+`deep` deeply dives into webpages to download the website's entire (not really) file tree, written in Rust.
+
 I personally use it to download documentations for offline access, but it can be used with most websites out there.
 
 # Installation
-##### With cargo
+##### Straight forward installation
 `cargo install --git https://github.com/EL-MASTOR/deep`
 ##### Build from source
 `git clone https://github.com/EL-MASTOR/deep && cd https://github.com/EL-MASTOR/deep && cargo build --release`
@@ -12,10 +13,16 @@ I personally use it to download documentations for offline access, but it can be
 `deep URL DIR BASE [FREQ] [-i IGNORED]`
 or `deep -a [FREQ]` for retrying failed urls[^3].
 
+##### Quick try
+You can try a quick example with:
+`deep ⚪`
+<!-- TODO: mv the log files to something like .deep-logs-->
+
 # Explaination of how it works
 The program uses an asynchronous `mpsc` channel that receives urls and does some work to each url. This works like a queue.
 The program first send the URL that you provided to the channel, which takes that url, and downloads its webpage at path[^2], and then all the new links in that page that met a certain criteria[^1] get sent to the same channel.
 This is repeated to each new link until no new links are found.
+That's why it is called `deep`, because it deeply dives into the website's tree to find new links to download.
 Once all the web pages have been downloaded, it proceeds to download the js, css, and image links found in those pages.
 After the program finishes, you can view the website tree with `cd DIR` (`DIR` here is the directory you provided), and then run `tree`.
 You can view it in the browser.
@@ -54,7 +61,7 @@ You can view it in the browser.
   > Did you notice the difference? The 2nd example without an ending `/` ignores `https://example.com/x/api` and `https://example.com/x/administration/x`, whereas the 1st one doesn't.
   > It is a good practice to always end your ignored pathnames with `/` to avoid ignoring links that you didn't intend to ignore. Unless, you want to ignore them too.
   You might specify as many ignored pathnames as you like.
-- [^2] The path and filename of the downloaded file is determined from the pathname of the url. Very straight forward. The page at `https://example.com/a/b/z.html` is downloaded to `DIR/a/b/z.html`. And the page at `https://example.com/a/b/y` is downloaded to `DIR/a/b/y/index.html` for html urls that don't end with ".html". `DIR` here is the directory name you provided. All messing directories are created.
+- [^2] The path and filename of the downloaded file is determined from the pathname of the url. Very straight forward. The page at `https://example.com/a/b/z.html` is downloaded to `DIR/a/b/z.html`. And the page at `https://example.com/a/b/y` is downloaded to `DIR/a/b/y/index.html` if it's an html file that doesn't end with ".html", otherwise it is just downloaded as is. `DIR` here is the directory name you provided. All messing directories are created.
 - [^3] Did some pages failed to download? Don't worry <!-- TODO: is `worry not` a right sentence. if so, prefer using it instead --> . You don't have to restart. All you have to do is cd into your `DIR` where you have downloaded the pages, then run `deep -a`. This will retry downloading the failed urls.
   <!-- TODO: information or informations?-->
   This uses the informations stored in `failsafe-log.bin` and `visited-log.bin`.
@@ -70,7 +77,17 @@ You can view it in the browser.
   > The 1st line is the base url. From the 2nd line which starts with `----` until the next one, there are ignored urls if any. you need to ignore any line in `visited-log.bin` that starts with any of these.
   > The other sections are failed urls.
 
-# Things to consider
+# Things to consider \[⚠️ IMPORTANT!!!\]
+- Be careful of how you specify `URL`! A trailing `/` can make a huge difference if it's present or not.
+Make sure it is present in URLs that don't end with a filename, and absent on the ones that do.
+Examples of URLs that ends with a filename:
+`https://example/a/b.html`,
+`https://example/a/c.json`.
+Examples of URLs that don't ends with a filename:
+`https://example/a/x/`,
+`https://example/a/images/`.
+If you're not sure about whether to add a trailing `/` or not, just load the URL in the browser and copy the link from the browser's address bar. The browser will do the job for you figuring out whether to add `/` or not.
+
 - Be carefull picking `BASE` value. The lower `BASE` is, the more websites are downloaded. So choose it to be as high as you need it to be.
   Let's say you want to download the python documentation at "https://courseswebsite.com/python/default.asp". 
   Here you should make the `BASE` to be as high as you want it to be, in this case it will be 1 to download all the sub-urls of "https://courseswebsite.com/python".
