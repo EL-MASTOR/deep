@@ -6,9 +6,9 @@ use std::{
     env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
 };
 use tokio::{
-    fs::{self, read_to_string},
-    sync::mpsc::{self, Receiver, Sender},
-    task::{self, JoinSet},
+    fs::{create_dir, create_dir_all, read_to_string, try_exists, write},
+    sync::mpsc::{channel, Receiver, Sender},
+    task::{yield_now, JoinSet},
     time::sleep,
 };
 use url::Url;
@@ -30,10 +30,10 @@ async fn download<T: AsRef<[u8]>>(
     }
     if let Some(parent) = path.parent() {
         if parent.to_str() != Some("") {
-            fs::create_dir_all(dir + parent.to_str().unwrap() + &tail_dir).await?;
+            create_dir_all(dir + parent.to_str().unwrap() + &tail_dir).await?;
         }
     }
-    fs::write(final_path, content).await?;
+    write(final_path, content).await?;
     Ok(())
 }
 
@@ -214,11 +214,11 @@ async fn read_file(log_file: &str) -> String {
 #[tokio::main]
 async fn main() {
     // TODO: try unbounded_channel
-    let (tx, mut rx) = mpsc::channel(10000000);
-    let (imgs_tx, mut imgs_rx) = mpsc::channel(10000000); // TODO: warn about this in this limit in the
-                                                          // readme. But check if there's any
-                                                          // downsides for encreasing this value
-    let (js_css_tx, mut js_css_rx) = mpsc::channel(10000000);
+    let (tx, mut rx) = channel(10000000);
+    let (imgs_tx, mut imgs_rx) = channel(10000000); // TODO: warn about this in this limit in the
+                                                    // readme. But check if there's any
+                                                    // downsides for encreasing this value
+    let (js_css_tx, mut js_css_rx) = channel(10000000);
     let tx = Arc::new(tx);
     let imgs_tx = Arc::new(imgs_tx);
     let js_css_tx = Arc::new(js_css_tx);
@@ -324,8 +324,8 @@ async fn main() {
         };
 
         let d = &*dir;
-        if let Ok(false) = fs::try_exists(d).await {
-            if let Err(err) = fs::create_dir(d).await {
+        if let Ok(false) = try_exists(d).await {
+            if let Err(err) = create_dir(d).await {
                 exit_code_1(format!("err creating {d}: {err}"));
             };
         }
@@ -493,7 +493,7 @@ async fn main() {
             );
 
             if Arc::strong_count(&sender) == 2 && !sent {
-                task::yield_now().await;
+                yield_now().await;
                 decrement(sender);
             }
         });
@@ -521,13 +521,13 @@ async fn main() {
     let failed_imgs_urls = stringify_urls(f_imgs, String::from("----imgs\n"));
 
     let deep_logs = dir.to_string() + "/_deep-logs";
-    if let Ok(false) = fs::try_exists(&deep_logs).await {
-        fs::create_dir(&deep_logs).await.unwrap();
+    if let Ok(false) = try_exists(&deep_logs).await {
+        create_dir(&deep_logs).await.unwrap();
     }
-    fs::write(deep_logs.to_owned() + "/visited.log", string_urls)
+    write(deep_logs.to_owned() + "/visited.log", string_urls)
         .await
         .unwrap();
-    fs::write(
+    write(
         deep_logs + "/failsafe.log",
         failed_urls + &failed_js_css_urls + &failed_imgs_urls,
     )
