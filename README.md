@@ -66,12 +66,12 @@ You can view it in the browser as explained in the [Quick try](#quick-try) secti
   > [!IMPORTANT]<br/>
   > `_deep-logs/visited.log` contains both failed and ignored URLs if any.<br/>
   > if you wish to get the URLs downloaded in your computer, you can use either of these methods:<br/>
-  > ..- **From file paths:** File names and paths get determined from their URLs.<br/>
+  >  - **From file paths:** File names and paths get determined from their URLs.<br/>
   > The root of `DIR` is the root of the websites, you just need to prefix it the domain name of the website.<br/>
   > It is important to note that URLs that don't end with ".html" get downloaded to "index.html".<br/>
   > "`DIR`/a/b/c.html" -> `https://example.com/a/b/c.html`<br/>
   > "`DIR`/x/y/z/index.html" -> `https://example.com/x/y/z`<br/>
-  > ..- **From log files:** You need to remove the failed and ignored URLs from `_deep-logs/visited.log`. You can get needed information needed from `_deep-logs/failsafe.log`. The latter is sectioned by `----`.<br/>
+  >  - **From log files:** You need to remove the failed and ignored URLs from `_deep-logs/visited.log`. You can get needed information needed from `_deep-logs/failsafe.log`. The latter is sectioned by `----`.<br/>
   > The 1st line is the base URL. From the 2nd line which starts with `----` until the next one, there are ignored URLs if any. You need to ignore any line in `_deep-logs/visited.log` that starts with any of these.<br/>
   > The other sections are failed URLs.
 
