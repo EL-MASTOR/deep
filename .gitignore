@@ -1,7 +1,5 @@
-.gitignore
-
 /target
 
-Cargo.lock
-
 test-urls.bash
+
+dist-*
