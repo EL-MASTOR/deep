@@ -30,13 +30,13 @@ You can view it in the browser as explained in the [Quick try](#quick-try) secti
 # Keynotes and usage tips
 - The program is asynchronous and concurrent for most of its work.
 - <span id="1">^1. </span> The criteria for picking URL links:<br/>
-  ..- **The URL link should start with a base.** All the URL links found in those pages that don't start with this base are ignored.<br/>
+    - **The URL link should start with a base.** All the URL links found in those pages that don't start with this base are ignored.<br/>
   The base is determined by taking `BASE` argument you provided (which is a number) and picking up until those number of pathnames in the `URL` to be the base.<br/>
   So if the `URL` you provided is `https://example.com/a/b/c/d`, (The pathname here is `/a/b/c/d`), and you specified `BASE` to be 2, the base URL will be `https://example.com/a/b`. And if `BASE` is 0, the base path is `https://example.com`.<br/>
   The js, css and image links are exceptional, as they only get checked if the URL starts with the host, the pathname isn't included. So they get checked if they start with `https://example.com`, as in `https://example.com/script.js` even if `BASE` is 2.<br/>
   This also means that external scripts, styles and images that are not related to the website aren't included.<br/>
   You can't pick `BASE` to be more than the number of components in the pathname of the `URL` you provided. In the previous example, `/a/b/c/d` has only 4 components, so you can't pick `BASE` to be 5.<br/>
-  ..- **The URLs are new.** Each URL, after they passed the base check, they get checked if they are new, to avoid repeating the work.<br/>
+    - **The URLs are new.** Each URL, after they passed the base check, they get checked if they are new, to avoid repeating the work.<br/>
   The program stores each new URL in a concurrent hashset with O(1) search time, so when ever a new URL is found, it checks if it's already in the hashset (processed) or not (not yet processed). If not already present in the hashset, it gets sent to the channel to be processed and downloaded.<br/>
   Only the origin of the URLs are checked, meaning if a URL is `https://example.com/a/b/x/y?query=string#hash`, the `?query=string#hash` part is removed so only the origin is remained, which contains the host and the pathname `https://example.com/a/b/x/y`. This makes the program more efficient, so it does not include URLs that point to the same website but look differently.
 - The optional argument `[FREQ]` (_frequency_) represents the amount of time in milliseconds between each request send.<br/>
