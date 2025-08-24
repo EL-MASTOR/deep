@@ -94,7 +94,7 @@ async fn fetch(
         return Err(FetchError::StatusCode(status));
     }
     let content_type = res.headers().get("content-type").unwrap();
-    let is_html = if content_type == "text/html" {
+    let is_html = if content_type.to_str().unwrap().starts_with("text/html") {
         true
     } else {
         false
