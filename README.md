@@ -62,7 +62,8 @@ You can view it in the browser as explained in the [Quick try](#quick-try) secti
   You might specify as many ignored pathnames as you like.
 - <span id="2">^2. </span> The path and filename of the downloaded file is determined from the pathname of the URL. Very straight forward. The page at `https://example.com/a/b/z.html` is downloaded to `DIR/a/b/z.html`. And the page at `https://example.com/a/b/y` is downloaded to `DIR/a/b/y/index.html` if it's an html file that doesn't end with ".html", otherwise it is just downloaded as is. `DIR` here is the directory name you provided. All messing directories are created.
 - <span id="3">^3. </span> Did some pages failed to download? Worry not! You don't have to restart. All you have to do is cd into your `DIR` where you have downloaded the pages, then run `deep -a`. This will retry downloading the failed URLs.<br/>
-  This uses the information stored in `_deep-logs/failsafe.log` and `_deep-logs/visited.log`.
+  This uses the information stored in `_deep-logs/failsafe.log` and `_deep-logs/visited.log`.<br/>
+  These files are updated after `deep -a` finishes, so if other URLs failed to download during that, you can just repeat the command.
   > [!IMPORTANT]<br/>
   > `_deep-logs/visited.log` contains both failed and ignored URLs if any.<br/>
   > if you wish to get the URLs downloaded in your computer, you can use either of these methods:<br/>

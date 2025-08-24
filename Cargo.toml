@@ -3,11 +3,18 @@ name = "deep"
 version = "0.1.0"
 edition = "2021"
 authors = ["EL-MASTOR <abdelwahabelmastor@gmail.com"]
-description = "`deep` creates a local version of a website by deeply diving into webpages to download the website's entire (not really) file tree, so you can interact with the website offline, written in Rust."
+description = "`deep` creates a local version of a website by deeply diving into webpages to download the website's entire (not really) file tree, so you can interact with the website offline. Written in Rust."
 readme="README.md"
 repository="https://www.github.com/EL-MASTOR/deep"
-keywords=["download","webpages"]
-categories=["web-utilities","automation"]
+keywords=["download","webpages", "rust", "html", "css", "javascript", "images", "web scraping", "local", "offline", "website"]
+categories=[
+    "command-line-utilities",
+    "filesystem",
+    "web-programming::http-client",
+# no-std::no-alloc
+# asynchronous
+# concurrency
+]
 
 [dependencies]
 reqwest = "0.12.9"
