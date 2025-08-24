@@ -211,6 +211,21 @@ async fn read_file(log_file: &str) -> String {
     }
 }
 
+async fn forward_resources(
+    links: &Vec<Url>,
+    urls: &Arc<DashSet<String>>,
+    sender: &Arc<Sender<Url>>,
+    origin: &Arc<String>,
+) {
+    for link in links {
+        let l = link.to_string();
+        if !urls.contains(&l) && l.starts_with(&**origin) {
+            urls.insert(l);
+            sender.send(link.to_owned()).await.unwrap();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // TODO: try unbounded_channel
@@ -247,7 +262,7 @@ async fn main() {
     } else {
         0
     };
-    let [dir, base_url] = if arguments.len() == 2 && arguments[1] == "-a" {
+    let [dir, base_url, origin] = if arguments.len() == 2 && arguments[1] == "-a" {
         let mut to_ignore = Vec::<String>::new();
         let missed_urls = read_file("_deep-logs/failsafe.log").await;
         let visited_urls = read_file("_deep-logs/visited.log").await;
@@ -276,7 +291,14 @@ async fn main() {
                 the_tx.send(Url::parse(url).unwrap()).await.unwrap();
             }
         }
-        [Arc::new(String::from(".")), base_url]
+        let origin = Arc::new(
+            Url::parse(&*base_url)
+                .unwrap()
+                .join("/")
+                .unwrap()
+                .to_string(),
+        );
+        [Arc::new(String::from(".")), base_url, origin]
     } else {
         let mut to_ignore = Vec::new();
         let usage = format!(
@@ -352,8 +374,9 @@ async fn main() {
         ignore = Arc::new(to_ignore);
 
         urls.insert(url.to_string());
+        let origin = Arc::new(url.join("/").unwrap().to_string());
         tx.send(url).await.unwrap();
-        [dir, base_url]
+        [dir, base_url, origin]
     };
 
     if rx.is_empty() {
@@ -370,6 +393,7 @@ async fn main() {
         let dir = Arc::clone(&dir);
         let fail = Arc::clone(&failed);
         let ignored = Arc::clone(&ignore);
+        let origin = Arc::clone(&origin);
 
         if duration != 0 {
             sleep(Duration::from_millis(duration)).await;
@@ -443,23 +467,10 @@ async fn main() {
                 vecs
             };
 
-            for img_src in &vecs[0] {
-                let src = img_src.to_string();
-                if !urls.contains(&src) {
-                    urls.insert(src);
-                    imgs_sender.send(img_src.to_owned()).await.unwrap();
-                }
-            }
-
+            forward_resources(&vecs[0], &urls, &imgs_sender, &origin).await;
             // &vecs[1..2] causes a segmentation fault
             for links in &vecs[1..3] {
-                for link in links {
-                    let l = link.to_string();
-                    if !urls.contains(&l) {
-                        urls.insert(l);
-                        js_css_sender.send(link.to_owned()).await.unwrap();
-                    }
-                }
+                forward_resources(links, &urls, &js_css_sender, &origin).await;
             }
 
             let mut sent = false;
