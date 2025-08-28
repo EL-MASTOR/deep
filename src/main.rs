@@ -488,7 +488,9 @@ async fn main() {
                     // PERF: urls contains unvisited `ignored` matched urls urls also. So this for loop isn't repeated.
                     urls.insert(l.clone());
                     for item in &*ignored {
-                        if l.starts_with(item) {
+                        if l.starts_with(item)
+                            || (item.ends_with('/') && l == item[..item.len() - 1])
+                        {
                             continue 'outer;
                         }
                     }
