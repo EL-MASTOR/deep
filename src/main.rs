@@ -37,9 +37,9 @@ async fn download<T: AsRef<[u8]>>(
     Ok(())
 }
 
-fn decrement(sender: Arc<Sender<Url>>) {
-    let s = Arc::strong_count(&sender);
-    let ptr = Arc::into_raw(sender);
+fn decrement(sender: &Arc<Sender<Url>>) {
+    let s = Arc::strong_count(sender);
+    let ptr = Arc::as_ptr(sender);
     unsafe {
         if s == 2 {
             Arc::decrement_strong_count(ptr);
@@ -420,7 +420,7 @@ async fn main() {
                             fail,
                             url,
                         );
-                        decrement(sender);
+                        decrement(&sender);
                         return;
                     }
                     Err(FetchError::ReqwestError(err)) => {
@@ -434,7 +434,7 @@ async fn main() {
                             fail,
                             url,
                         );
-                        decrement(sender);
+                        decrement(&sender);
                         return;
                     }
                 };
@@ -474,6 +474,7 @@ async fn main() {
             }
 
             let mut sent = false;
+            let mut to_send = Vec::with_capacity(vecs[3].len());
             'outer: for link in &vecs[3] {
                 let path = link.path();
                 let link = if let Ok(joined_link) = link.join(path) {
@@ -494,7 +495,7 @@ async fn main() {
                             continue 'outer;
                         }
                     }
-                    sender.send(link).await.unwrap();
+                    to_send.push(link);
                     sent = true;
                 }
             }
@@ -507,7 +508,11 @@ async fn main() {
 
             if Arc::strong_count(&sender) == 2 && !sent {
                 yield_now().await;
-                decrement(sender);
+                decrement(&sender);
+            }
+
+            for link in to_send {
+                sender.send(link).await.unwrap();
             }
         });
     }
