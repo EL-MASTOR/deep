@@ -2,14 +2,12 @@ use core::{panic, result::Result};
 use dashmap::DashSet;
 use reqwest::{Client, Error, StatusCode};
 use scraper::{Html, Selector};
-use std::{
-    env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, time::Duration, vec,
-};
+use std::{env::args, io::Result as io_result, path::Path, process::exit, sync::Arc, vec};
 use tokio::{
     fs::{create_dir, create_dir_all, read_to_string, try_exists, write},
     sync::mpsc::{channel, Receiver, Sender},
     task::{yield_now, JoinSet},
-    time::sleep,
+    time::{sleep, Duration},
 };
 use url::Url;
 
