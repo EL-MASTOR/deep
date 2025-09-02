@@ -1,6 +1,6 @@
 [package]
 name = "deep"
-version = "0.1.0"
+version = "0.6.8"
 edition = "2021"
 authors = ["EL-MASTOR <abdelwahabelmastor@gmail.com"]
 description = "`deep` creates a local version of a website by deeply diving into webpages to download the website's entire (not really) file tree, so you can interact with the website offline. Written in Rust."
